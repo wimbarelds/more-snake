@@ -8,6 +8,7 @@
                         Start game
                         <span class="small-text">{{ level }}</span>
                     </button>
+                    <button type="button" @click="$emit('update-state', 'load-bot')">Load bot</button>
                     <button type="button" @click="$emit('update-state', 'choose-level')">Choose level</button>
                     <button type="button" @click="$emit('update-state', 'highscores')">Show highscores</button>
                 </div>

@@ -134,21 +134,33 @@ export class Snake {
         return false;
     }
 
-    private placeCandy(n: number = 1) {
+    private isTailCollision() {
+        const head = this.snakeTiles[this.snakeTiles.length - 1];
+        for (let i = 0; i < this.snakeTiles.length - 2; i++) {
+            const tailBit = this.snakeTiles[i];
+            if (tailBit.x === head.x && tailBit.y === head.y) return true;
+        }
+        return false;
+    }
+
+    private placeCandy(n: number = 1): Pos[] {
         const validTiles = this.floorTiles.filter((floorTile) => {
             if (this.snakeTiles.some((snakeTile) => (snakeTile.x === floorTile.x && snakeTile.y === floorTile.y))) return false;
             if (this.candyTiles.some((candyTile) => (candyTile.x === floorTile.x && candyTile.y === floorTile.y))) return false;
             return true;
         });
 
+        const placements: Pos[] = [];
+
         for (let i = 0; i < n; i++) {
             if (validTiles.length === 0) break;
             const tileIndex = this.getRandom(0, validTiles.length, true);
             const tile = validTiles.splice(tileIndex, 1)[0];
             this.candyTiles.push(tile);
+            placements.push(tile);
         }
 
-        // TODO: Update candy layer, this should be an event or something
+        return placements;
     }
 
     private indexOfCandyAt(pos: Pos) {
@@ -181,24 +193,24 @@ export class Snake {
         this.direction = newDirection;
     }
 
-    public tick(): boolean {
+    public tick(): boolean | Pos[] {
         // First add a new block at the head of the snake
         const oldHead = this.snakeTiles[this.snakeTiles.length - 1];
         const newHeadPos = { x: oldHead.x + this.direction.x, y: oldHead.y + this.direction.y };
         this.snakeTiles.push(newHeadPos);
         // Check if we ran into a wall
-        if (this.isWallCollisionAt(newHeadPos) || this.isOutOfBounds(newHeadPos)) {
+        if (this.isWallCollisionAt(newHeadPos) || this.isOutOfBounds(newHeadPos) || this.isTailCollision()) {
             return false;
-        }
-        // Check for candy collisions at head
-        if (this.indexOfCandyAt(newHeadPos) !== -1) {
-            this.placeCandy();
-            this.score++;
-            // TODO: Announce the score changed
         }
         // If we cannot remove a candy at the snake tail end, then chop off it's tail (otherwise leave it, letting the snake extend)
         if (!this.removeCandyAt(this.snakeTiles[0])) {
             this.snakeTiles.splice(0, 1);
+        }
+        // Check for candy collisions at head
+        if (this.indexOfCandyAt(newHeadPos) !== -1) {
+            this.score++;
+            const candyPlaced: Pos[] = this.placeCandy();
+            return candyPlaced;
         }
         // We didn't run into a wall, so all is good
         return true;

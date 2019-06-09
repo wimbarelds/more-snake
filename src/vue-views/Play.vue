@@ -21,6 +21,11 @@
     <game-manual-input
       :show="showManualInput"
       />
+    <game-bot-loader
+      :show="showBotLoader"
+      @close="closeBotLoader()"
+      @play-bot="playBot($event)"
+      />
     <canvas width="1280" height="640" ref="canvas"></canvas>
   </div>
 </template>
@@ -32,11 +37,13 @@ import GameHighscores from './Play/GameHighscores.vue';
 import GameMenu from './Play/GameMenu.vue';
 import GameLevelPicker from './Play/GameLevelPicker.vue';
 import GameManualInput from './Play/GameManualInput.vue';
+import GameBotLoader from './Play/GameBotLoader.vue';
 
 import { Snake, Level } from '@/game/Snake';
 import { SnakePlayer, InputHistory } from '@/game/SnakePlayer';
 import { SnakeRenderer, Theme } from '@/game/SnakeRenderer';
 import { SnakeRecording } from '@/game/SnakeRecording';
+import { SnakeBot } from '@/game/SnakeBot';
 import Axios from 'axios';
 
 interface GamePlayerState {
@@ -44,7 +51,7 @@ interface GamePlayerState {
   level: Level;
   game: Snake;
   renderer: SnakeRenderer;
-  player: SnakePlayer;
+  player: SnakePlayer | SnakeBot;
 };
 
 export interface GamePlayerResult {
@@ -61,7 +68,7 @@ const theme: Theme = {
   candyColor: '#F90',
 };
 
-type GameState = 'menu' | 'play' | 'replay' | 'highscores' | 'choose-level';
+type GameState = 'menu' | 'play' | 'replay' | 'highscores' | 'choose-level' | 'load-bot' | 'play-bot';
 @Component({
   components: {
     GameScore,
@@ -69,6 +76,7 @@ type GameState = 'menu' | 'play' | 'replay' | 'highscores' | 'choose-level';
     GameMenu,
     GameLevelPicker,
     GameManualInput,
+    GameBotLoader,
   },
 })
 export default class HomeView extends Vue {
@@ -107,6 +115,10 @@ export default class HomeView extends Vue {
     return this.gameState === 'choose-level';
   }
 
+  public get showBotLoader(): boolean {
+    return this.gameState === 'load-bot';
+  }
+
   public updateState(newState: GameState): void {
     this.gameState = newState;
     if (newState === 'play') this.play();
@@ -135,7 +147,7 @@ export default class HomeView extends Vue {
     player.gameover.then(this.playerGameoverHandler.bind(this, state));
   }
 
-  public async startReplay({ playId, inputHistory }: {playId: string, inputHistory: InputHistory }) {
+  public async startReplay({ playId, inputHistory }: {playId: string, inputHistory: InputHistory }): Promise<void> {
     this.updateState('replay');
     const canvas = this.$refs.canvas as HTMLCanvasElement;
     const context = canvas.getContext('2d') as CanvasRenderingContext2D;
@@ -158,6 +170,29 @@ export default class HomeView extends Vue {
     this.playerResult = null;
   }
 
+  public closeBotLoader(): void {
+    this.updateState('menu');
+  }
+
+  public async playBot(bot: Worker): Promise<void> {
+    this.gameState = 'play';
+    this.playerResult = null;
+    const canvas = this.$refs.canvas as HTMLCanvasElement;
+    const context = canvas.getContext('2d') as CanvasRenderingContext2D;
+    const level = (await Axios.get(`/level/${this.levelName}`)).data.data;
+    const playId = (await Axios.post(`/get-play-id`, { sessionId: this.sessionId })).data.data;
+
+    const game = new Snake(playId, level);
+    game.addScoreListener(this.setScore.bind(this));
+
+    const renderer = new SnakeRenderer(game, theme, context);
+    const botPlayer = new SnakeBot(game, level, bot);
+
+    // Wait for gameover
+    const state: GamePlayerState = { playId, level, game, renderer, player: botPlayer };
+    botPlayer.gameover.then(this.botGameoverHandler.bind(this, state));
+  }
+
   public setScore(score: number) {
     this.score = score;
   }
@@ -174,6 +209,12 @@ export default class HomeView extends Vue {
     };
     this.updateState('highscores');
     // highscores: scores[], highscore: boolean
+  }
+
+  private async botGameoverHandler(state: GamePlayerState, inputHistory: InputHistory) {
+    state.player.destroy();
+    state.renderer.destroy();
+    this.gameState = 'menu';
   }
 }
 </script>

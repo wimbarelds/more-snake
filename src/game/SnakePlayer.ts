@@ -40,6 +40,7 @@ export class SnakePlayer {
     private tickInput: Pos | null = null;
     private queuedInput: Pos | null = null;
     private snakeGame: Snake;
+    private keycodeHistory: number[] = [];
     
     private inputHandler: (e: KeyboardEvent) => void;
     private gameoverPromise: Promise<InputHistory>;
@@ -54,6 +55,8 @@ export class SnakePlayer {
         // Add input handler
         this.snakeGame = snakeGame;
         this.inputHandler = (e: KeyboardEvent) => {
+            this.logKeyCode(e.keyCode);
+
             const newDirection = KEYDIRECTIONS[e.keyCode];
             if (!newDirection) return;
 
@@ -106,6 +109,17 @@ export class SnakePlayer {
         const calc3 = (calc2-0.2) * 2.5;
         const calc4 = calc3 * SnakePlayer.TICK_INTERVAL_RANGE + (SnakePlayer.TICK_INTERVAL_BASE - SnakePlayer.TICK_INTERVAL_RANGE);
         return calc4;
+    }
+
+    private logKeyCode(keyCode: number) {
+        this.keycodeHistory.push(keyCode);
+        while (this.keycodeHistory.length > KONAMI.length) {
+            this.keycodeHistory.splice(0, 1);
+        }
+        // Check for KONAMI code match
+        if (this.keycodeHistory.length === KONAMI.length && this.keycodeHistory.every((key, index) => KONAMI[index] === key)) {
+            this.snakeGame.enableCheats();
+        }
     }
 
     private bindKeys() {
