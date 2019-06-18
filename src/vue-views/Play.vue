@@ -1,11 +1,14 @@
 <template>
   <div class="play">
-    <game-score :value="score" :show="showScores" />
+    <game-scores :values="scores" :show="showScores" />
     <game-menu
       :show="showMenu"
-      :level="levelName"
+      :levelName="levelName"
+      :level="level"
+      :numPlayers="numPlayers"
       @setLevel="levelName = $event"
       @update-state="updateState($event)"
+      @update-num-players="setNumPlayers($event)"
       />
     <game-highscores
       :show="showHighscores"
@@ -23,6 +26,7 @@
       />
     <game-bot-loader
       :show="showBotLoader"
+      :numPlayers="numPlayers"
       @close="closeBotLoader()"
       @play-bot="playBot($event)"
       />
@@ -31,27 +35,29 @@
 </template>
 
 <script lang="ts">
-import { Component, Vue } from 'vue-property-decorator';
-import GameScore from './Play/GameScore.vue';
-import GameHighscores from './Play/GameHighscores.vue';
+import { Component, Vue, Watch } from 'vue-property-decorator';
+import GameScores from './Play/GameScores.vue';
+import GameHighscores, { ServerResult } from './Play/GameHighscores.vue';
 import GameMenu from './Play/GameMenu.vue';
 import GameLevelPicker from './Play/GameLevelPicker.vue';
 import GameManualInput from './Play/GameManualInput.vue';
 import GameBotLoader from './Play/GameBotLoader.vue';
 
-import { Snake, Level } from '@/game/Snake';
+import { SnakeGame, Level, SnakeAgentController } from '@/game/SnakeGame';
 import { SnakePlayer, InputHistory } from '@/game/SnakePlayer';
 import { SnakeRenderer, Theme } from '@/game/SnakeRenderer';
 import { SnakeRecording } from '@/game/SnakeRecording';
 import { SnakeBot } from '@/game/SnakeBot';
 import Axios from 'axios';
+import { Alert } from '../alerts/alerts';
+import { keyBindings } from '../game/SnakeKeyBindings';
+import { SnakeAgent } from '../game/SnakeAgent';
 
 interface GamePlayerState {
   playId: string;
-  level: Level;
-  game: Snake;
+  game: SnakeGame;
   renderer: SnakeRenderer;
-  player: SnakePlayer | SnakeBot;
+  players: SnakeAgentController[];
 };
 
 export interface GamePlayerResult {
@@ -61,17 +67,17 @@ export interface GamePlayerResult {
   inputHistory: InputHistory;
 };
 
-const theme: Theme = {
-  wallColor: '#900',
-  snakeColor: '#090',
+export const theme: Theme = {
+  wallColor: '#fd5819',
+  snakeColor: ['hsl(190, 89%, 49%)', 'hsl(220, 89%, 49%)', 'hsl(250, 89%, 49%)', 'hsl(160, 89%, 49%)'],
   floorColor: '#FFF',
-  candyColor: '#F90',
+  candyColor: '#3F3',
 };
 
 type GameState = 'menu' | 'play' | 'replay' | 'highscores' | 'choose-level' | 'load-bot' | 'play-bot';
 @Component({
   components: {
-    GameScore,
+    GameScores,
     GameHighscores,
     GameMenu,
     GameLevelPicker,
@@ -81,18 +87,22 @@ type GameState = 'menu' | 'play' | 'replay' | 'highscores' | 'choose-level' | 'l
 })
 export default class HomeView extends Vue {
   public gameState: GameState = 'menu';
-  public score: number = 0;
+  public scores: number[] = [0];
   public levelName: string = 'cw-level';
+  public level: Level | null = null;
+  public numPlayers: number = 1;
   public playerResult: GamePlayerResult | null = null;
   public sessionId: string = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(32);
 
-  public mounted() {
+  public created() {
     // load or save session ID, this is used for saving maps as a user-token
     if (sessionStorage.sessionID) {
         this.sessionId = sessionStorage.sessionId;
     } else {
         sessionStorage.sessionId = this.sessionId;
     }
+    // load map
+    this.loadLevel();
   }
 
   public get showMenu(): boolean {
@@ -119,6 +129,11 @@ export default class HomeView extends Vue {
     return this.gameState === 'load-bot';
   }
 
+  public get maxNumPlayers(): number {
+    if (!this.level) return 0;
+    return this.level.snakeTiles.length;
+  }
+
   public updateState(newState: GameState): void {
     this.gameState = newState;
     if (newState === 'play') this.play();
@@ -129,22 +144,57 @@ export default class HomeView extends Vue {
     this.gameState = 'menu';
   }
 
-  public async play() {
-    this.playerResult = null;
-    const canvas = this.$refs.canvas as HTMLCanvasElement;
-    const context = canvas.getContext('2d') as CanvasRenderingContext2D;
-    const level = (await Axios.get(`/level/${this.levelName}`)).data.data;
-    const playId = (await Axios.post(`/get-play-id`, { sessionId: this.sessionId })).data.data;
+  public setNumPlayers(numPlayers: number): void {
+    if (!this.level) {
+      Alert('You cannot set the number of players before the level has been loaded');
+      return;
+    } else if (numPlayers > this.maxNumPlayers) {
+      Alert(`This map only supports ${this.maxNumPlayers} players`);
+      return;
+    } else if (numPlayers < 1) {
+      Alert('Stop being such a jerk');
+      return;
+    } else {
+      this.numPlayers = numPlayers;
+    }
+  }
 
-    const game = new Snake(playId, level);
+  @Watch('levelName')
+  private async loadLevel() {
+    this.level = null;
+    const result = (await Axios.get<ServerResult<Level>>(`/level/${this.levelName}`)).data;
+    if (!result.success) {
+      Alert('Failed to load level ' + this.levelName);
+    } else {
+      this.level = result.data;
+      this.setNumPlayers(this.numPlayers);
+    }
+  }
+
+  public async play() {
+    if (!this.level) {
+      Alert(`Can't play when level isn't loaded`);
+      return;
+    }
+    // Reset state
+    this.playerResult = null;
+    this.scores = new Array(this.numPlayers).fill(0);
+
+    // Start a game
+    const playId = (await Axios.post(`/get-play-id`, { sessionId: this.sessionId })).data.data;
+    const game = new SnakeGame(playId, this.level, this.numPlayers);
     game.addScoreListener(this.setScore.bind(this));
 
+    const canvas = this.$refs.canvas as HTMLCanvasElement;
+    const context = canvas.getContext('2d') as CanvasRenderingContext2D;
     const renderer = new SnakeRenderer(game, theme, context);
-    const player = new SnakePlayer(game);
+    const players = game.assignAgentControllers((agent: SnakeAgent, agentIndex: number) => {
+      return new SnakePlayer(agent, keyBindings[agentIndex]);
+    })
 
     // Wait for gameover
-    const state: GamePlayerState = { playId, level, game, renderer, player };
-    player.gameover.then(this.playerGameoverHandler.bind(this, state));
+    const state: GamePlayerState = { playId, game, renderer, players };
+    game.gameover.then(this.playersGameoverHandler.bind(this, state));
   }
 
   public async startReplay({ playId, inputHistory }: {playId: string, inputHistory: InputHistory }): Promise<void> {
@@ -152,7 +202,7 @@ export default class HomeView extends Vue {
     const canvas = this.$refs.canvas as HTMLCanvasElement;
     const context = canvas.getContext('2d') as CanvasRenderingContext2D;
     const level = (await Axios.get(`/level/${this.levelName}`)).data.data;
-    const game = new Snake(playId, level);
+    const game = new SnakeGame(playId, level, 1);
     game.addScoreListener(this.setScore.bind(this));
 
     const renderer = new SnakeRenderer(game, theme, context);
@@ -174,7 +224,12 @@ export default class HomeView extends Vue {
     this.updateState('menu');
   }
 
-  public async playBot(bot: Worker): Promise<void> {
+  public async playBot(bots: Worker[]): Promise<void> {
+    if (!this.level) {
+      Alert(`Can't activate bot when level isn't loaded`);
+      return;
+    }
+
     this.gameState = 'play';
     this.playerResult = null;
     const canvas = this.$refs.canvas as HTMLCanvasElement;
@@ -182,37 +237,40 @@ export default class HomeView extends Vue {
     const level = (await Axios.get(`/level/${this.levelName}`)).data.data;
     const playId = (await Axios.post(`/get-play-id`, { sessionId: this.sessionId })).data.data;
 
-    const game = new Snake(playId, level);
+    const game = new SnakeGame(playId, level, bots.length);
     game.addScoreListener(this.setScore.bind(this));
 
     const renderer = new SnakeRenderer(game, theme, context);
-    const botPlayer = new SnakeBot(game, level, bot);
+    const botPlayers = bots.map((bot, botIndex) => new SnakeBot(game, level, bot, botIndex));
 
     // Wait for gameover
-    const state: GamePlayerState = { playId, level, game, renderer, player: botPlayer };
-    botPlayer.gameover.then(this.botGameoverHandler.bind(this, state));
+    const state: GamePlayerState = { playId, game, renderer, players: botPlayers };
+    game.gameover.then(this.botGameoverHandler.bind(this, state));
   }
 
-  public setScore(score: number) {
-    this.score = score;
+  public setScore({ playerIndex, score } : { playerIndex: number, score: number }) {
+    this.$set(this.scores, playerIndex, score);
   }
 
-  private async playerGameoverHandler(state: GamePlayerState, inputHistory: InputHistory) {
-    state.player.destroy();
+  private async playersGameoverHandler(state: GamePlayerState) {
+    state.players.forEach((player: SnakeAgentController) => player.destroy());
     state.renderer.destroy();
 
-    this.playerResult = {
-      playId: state.playId,
-      sessionId: this.sessionId,
-      score: state.game.getScore(),
-      inputHistory,
-    };
+    if (this.numPlayers === 1) {
+      this.playerResult = {
+        playId: state.playId,
+        sessionId: this.sessionId,
+        score: state.game.getScores()[0],
+        inputHistory: (state.players[0] as unknown as SnakePlayer).inputHistory
+      };
+    } else {
+      this.playerResult = null;
+    }
     this.updateState('highscores');
-    // highscores: scores[], highscore: boolean
   }
 
-  private async botGameoverHandler(state: GamePlayerState, inputHistory: InputHistory) {
-    state.player.destroy();
+  private async botGameoverHandler(state: GamePlayerState) {
+    state.players.forEach((player: SnakeAgentController) => player.destroy());
     state.renderer.destroy();
     this.gameState = 'menu';
   }

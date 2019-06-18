@@ -11,8 +11,9 @@
 
 <script lang="ts">
 import { Component, Vue, Prop } from 'vue-property-decorator';
-import { Direction } from '../../game/Snake';
-import { KEYCODES } from '../../game/SnakePlayer';
+import { Direction } from '../../game/SnakeGame';
+import { keyBindings } from '../../game/SnakeKeyBindings';
+
 @Component
 export default class GameMenu extends Vue {
     @Prop({ default: false }) public show!: boolean;
@@ -20,7 +21,7 @@ export default class GameMenu extends Vue {
     public sendFake(key: Direction) {
         const event = document.createEvent('Event');
         if (event.initEvent) event.initEvent('keydown', true, true);
-        Object.assign(event, { keyCode: KEYCODES[key], which: KEYCODES[key] });
+        Object.assign(event, { keyCode: keyBindings[0], which: keyBindings[0][key] });
         window.dispatchEvent(event);
     }
 }

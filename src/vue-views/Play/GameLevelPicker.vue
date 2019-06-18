@@ -92,6 +92,7 @@ button {
   box-shadow: 0px 0px var(--color-accent);
   transition: box-shadow 0.4s ease-in-out;
   outline: 0;
+  margin-bottom: 5px;
 
   &:hover {
     box-shadow: 5px 5px var(--color-accent);

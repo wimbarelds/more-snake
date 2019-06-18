@@ -18,7 +18,7 @@
                     <form class="bot-loader-option" @submit="onURLSubmit($event)">
                         <h3>Enter Bot-script URL</h3>
                         <div class="form">
-                            <input type="url" placeholder="http://" required v-model="botURL">
+                            <input type="url" placeholder="http://" v-model="botURL">
                             <button type="submit">Load bot from URL</button>
                         </div>
                     </form>
@@ -45,8 +45,9 @@ import Axios from 'axios';
 @Component
 export default class GameBotLoader extends Vue {
     @Prop({ default: false }) show!: boolean;
+    @Prop({ required: true }) numPlayers!: number;
 
-    public botURL: string = 'http://localhost:8008/wim-bot.js';
+    public botURL: string = '';
     public file: File | null = null;
 
     public get fileName(): string {
@@ -64,22 +65,24 @@ export default class GameBotLoader extends Vue {
 
     public async onURLSubmit(e: Event) {
         e.preventDefault();
-        const response = Axios.get<string>(this.botURL);
+        const url = this.botURL || `${location.protocol}//${location.host}/wim-bot.js`
+        const response = Axios.get<string>(url);
         const script: string = (await response).data;
-        const bot: Worker = new Worker(
+        const bots: Worker[] = new Array(this.numPlayers).fill(null).map(() => new Worker(
             URL.createObjectURL(new Blob([ script ]))
-        );
-        this.$emit('play-bot', bot);
+        ));
+        this.$emit('play-bot', bots);
     }
 
     public onFileSubmit(e: Event): void {
         e.preventDefault();
         const fileInput: HTMLInputElement = this.$refs.fileInput as HTMLInputElement;
         if (!fileInput.files || !fileInput.files.length) return;
-        const bot: Worker = new Worker(
-            URL.createObjectURL(fileInput.files[0])
-        );
-        this.$emit('play-bot', bot);
+        const file: File = fileInput.files[0];
+        const bots: Worker[] = new Array(this.numPlayers).fill(null).map(() => new Worker(
+            URL.createObjectURL(file)
+        ));
+        this.$emit('play-bot', bots);
     }
 };
 </script>

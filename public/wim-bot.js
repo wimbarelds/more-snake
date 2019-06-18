@@ -1,6 +1,8 @@
+let botIndex = 0;
 let wallTiles = [];
-let snakeTiles = [];
+let snakeTiles = [[]];
 let candyTiles = [];
+let floorTiles = [];
 
 let SEARCH_SPEED = 18.5;
 
@@ -23,19 +25,79 @@ const DIRECTIONS = {
     RIGHT: { x: 10, y: 0 }
 };
 
+const directionsArray = [ 'UP', 'DOWN', 'LEFT', 'RIGHT' ];
+
 // NOTE TO SELF: If you cant find a candy, go in the direction that has the most search-options
 
 const DIRECTIONKEYS = Object.keys(DIRECTIONS);
 
+const computeFloorTiles = () => {
+    const floorTiles = [];
+    // First copy our snake tiles as floor tiles as the snake must always start on valid floortiles
+    snakeTiles.forEach((snake) => {
+        snake.forEach((snakeTile) => floorTiles.push({ x: snakeTile.x, y: snakeTile.y }));
+    })
+    // Then expand outwards from there in all directions until a wall is hit
+    // Create a map in which we record which tiles have been scanned, so we don't scan anything twice
+    const scannedMap = snakeTiles.reduce((acc, snake) => {
+        snake.forEach((curr) => { acc[`${curr.x}.${curr.y}`] = true; });
+        return acc;
+    }, {});
+
+    // Create a list of tiles to search from
+    let searchFromTiles = floorTiles.slice();
+    while (true) {
+        const newTiles = [];
+        for (const floorTile of searchFromTiles) {
+            const search = [
+                { x: floorTile.x - 10, y: floorTile.y },
+                { x: floorTile.x + 10, y: floorTile.y },
+                { x: floorTile.x, y: floorTile.y - 10 },
+                { x: floorTile.x, y: floorTile.y + 10 },
+            ];
+            for (const tile of search) {
+                const key = `${tile.x}.${tile.y}`;
+                if (scannedMap[key]) continue; // If we've already scanned this tile, ignore it
+                scannedMap[key] = true; // Otherwise we're scanning it now, so adding it to the list
+                if (isWallCollisionAt(tile)) continue; // If there is a wall here, it's not a floor tile
+                if (isOutOfBounds(tile)) continue;
+                newTiles.push(tile);
+            }
+        }
+        // If we haven't found any new tiles, we're done
+        if (newTiles.length === 0) break;
+        // Add all the newly found tiles to the floorTiles list
+        floorTiles.push.apply(floorTiles, newTiles);
+        // Then search from the new
+        searchFromTiles = newTiles;
+    }
+    return floorTiles;
+}
+
+let placeFakeCandy;
+
 const init = function(data) {
+    botIndex = data.botIndex;
     candyTiles = data.candyTiles;
     snakeTiles = data.level.snakeTiles;
     // Sort walltiles for faster searching
     wallTiles = data.level.wallTiles.slice().sort((a, b) => ((a.x === b.x) ? (a.y - b.y) : (a.x - b.x)));
+
+    floorTiles = computeFloorTiles();
+    placeFakeCandy = () => {
+        const numCandyToPlace = Math.round(floorTiles.length / 150);
+        for (let i = 0; i < numCandyToPlace; i++) {
+            const randNum = Math.floor(Math.random() * floorTiles.length);
+            const pos = floorTiles[randNum];
+            if (snakeTiles.some((snake) => snake.some((snakeTile) => snakeTile.x === pos.x && snakeTile.y === pos.y))) continue;
+            if (candyTiles.some((candyTile) => candyTile.x === pos.x && candyTile.y === pos.y)) continue;
+            placeCandy(pos);
+        }
+    }
 };
 
 function placeCandy(data) {
-    if (candyTiles instanceof Array) {
+    if (data instanceof Array) {
         candyTiles.push(... data);
     } else {
         candyTiles.push(data);
@@ -76,17 +138,18 @@ const isOutOfBounds = (pos) => {
 }
 
 const isTailCollision = (location, skipHead = false) => {
-    for (let i = 0; i < snakeTiles.length - (skipHead ? 2 : 1); i++) {
-        const tailBit = snakeTiles[i];
-        if (tailBit.x === location.x && tailBit.y === location.y) return true;
-    }
-    return false;
+    return snakeTiles.some((snake) => snake.some((snakeTile) => {
+        if (skipHead && location === snakeTile) return false;
+        if (location.x !== snakeTile.x) return false;
+        if (location.y !== snakeTile.y) return false;
+        return true;
+    }))
 }
 
 const deathCheck = (location) => {
-    if (isWallCollisionAt(location)) return true;
-    if (isOutOfBounds(location)) return true;
     if (isTailCollision(location)) return true;
+    if (isOutOfBounds(location)) return true;
+    if (isWallCollisionAt(location)) return true;
     return false;
 }
 
@@ -137,12 +200,13 @@ const getExpandedSearchArea = (search, forbidden) => {
 };
 
 const searchCandy = (direction, maxLocationsSearched) => {
-    const snakeHead = snakeTiles[snakeTiles.length - 1];
+    const snakeHead = snakeTiles[botIndex][snakeTiles[botIndex].length - 1];
     // Array of where we cant go
     const forbidden = { [getLocationStr(snakeHead)]: snakeHead };
 
     // Array containing our next search points
     let search = {};
+    const exploredInDirection = {};
     const opposite = OPPOSITES[direction];
     // Determine possible search tiles
     for (let directionKey of DIRECTIONKEYS) {
@@ -150,6 +214,7 @@ const searchCandy = (direction, maxLocationsSearched) => {
         if (directionKey === opposite) continue;
         const DIRECTION = DIRECTIONS[directionKey];
         search[directionKey] = trimCollisionLocations([{ x: snakeHead.x + DIRECTION.x, y: snakeHead.y + DIRECTION.y }]);
+        exploredInDirection[directionKey] = search[directionKey].length;
     }
 
     locationsSearched = 0;
@@ -165,7 +230,16 @@ const searchCandy = (direction, maxLocationsSearched) => {
                 }
                 // If we don't find a candy but have searched too far, stop searching
                 if (++locationsSearched >= maxLocationsSearched) {
-                    return false;
+                    // Instead of going in the direction of a candy, go into the direction of the most open space
+                    let mostOpenDirection = false;
+                    let mostOpenDirectionSpace = 0;
+                    for (let directionKey in exploredInDirection) {
+                        if (exploredInDirection[directionKey] > mostOpenDirectionSpace) {
+                            mostOpenDirection = directionKey;
+                            mostOpenDirectionSpace = exploredInDirection[directionKey];
+                        }
+                    }
+                    return mostOpenDirection;
                 }
             }
         }
@@ -174,13 +248,18 @@ const searchCandy = (direction, maxLocationsSearched) => {
         const numSearchLocations = Object.values(search).reduce((count, locations) => count + locations.length, 0);
         if (numSearchLocations === 0){
             // There's nowhere to go, we've exhausted all search options
-            return false;
+            return 0;
+        }
+        else {
+            for (let directionKey in exploredInDirection) {
+                exploredInDirection[directionKey] += search[directionKey].length;
+            }
         }
     }
 }
 
 const snapDecision = (direction) => {
-    let snakeHead = snakeTiles[snakeTiles.length - 1];
+    let snakeHead = snakeTiles[botIndex][snakeTiles[botIndex].length - 1];
     let directionIndex = DIRECTIONKEYS.indexOf(direction);
     for(let i = 0; i < DIRECTIONKEYS.length; i++) {
         let moveIndex = (directionIndex + i) % DIRECTIONKEYS.length;
@@ -194,42 +273,65 @@ const snapDecision = (direction) => {
 let stuckDirection = null;
 const compactMovement = (direction) => {
     if(stuckDirection === null) stuckDirection = direction;
+    const snakeHead = snakeTiles[botIndex][snakeTiles[botIndex].length - 1];
 
-    if((stuckDirection === 'UP' || stuckDirection === 'DOWN') && direction == 'LEFT') {
-        if(!deathCheck({ x: snakeHead.x - 10, y: snakeHead.y })) return 'LEFT';
-        else if(stuckDirection === 'UP' && !deathCheck({ x: snakeHead.x, y: snakeHead.y - 10 })) return 'UP';
-        else if(stuckDirection === 'DOWN' && !deathCheck({ x: snakeHead.x, y: snakeHead.y + 10 })) return 'DOWN';
+    if(stuckDirection === 'UP' || stuckDirection === 'DOWN') {
+        // Try move as much vertically as possible
+        if (direction === stuckDirection) {
+            const forwards = DIRECTIONS[direction];
+            //  If we can continue going forwards, do that
+            if (!deathCheck({ x: snakeHead.x + forwards.x, y: snakeHead.y + forwards.y })) return direction;
+
+            // We can't continue to go in the direction we want to, reverse
+            stuckDirection = OPPOSITES[direction];
+
+            const left = DIRECTIONS.LEFT;
+            if (!deathCheck({ x: snakeHead.x + left.x, y: snakeHead.y + left.y })) return 'LEFT';
+            return 'RIGHT';
+        } else {
+            const desiredDirection = DIRECTIONS[stuckDirection];
+            if (!deathCheck({ x: snakeHead.x + desiredDirection.x, y: snakeHead.y + desiredDirection.y })) return stuckDirection;
+            const forwards = DIRECTIONS[direction];
+            if (!deathCheck({ x: snakeHead.x + forwards.x, y: snakeHead.y + forwards.y })) return direction;
+            return OPPOSITES[stuckDirection];
+        }
+    } else {
+        // Try move as much horizontally as possible
+        if (direction === stuckDirection) {
+            const forwards = DIRECTIONS[direction];
+            //  If we can continue going forwards, do that
+            if (!deathCheck({ x: snakeHead.x + forwards.x, y: snakeHead.y + forwards.y })) return direction;
+
+            // We can't continue to go in the direction we want to, reverse
+            stuckDirection = OPPOSITES[direction];
+
+            const up = DIRECTIONS.UP;
+            if (!deathCheck({ x: snakeHead.x + up.x, y: snakeHead.y + up.y })) return 'UP';
+            return 'DOWN';
+        } else {
+            const desiredDirection = DIRECTIONS[stuckDirection];
+            if (!deathCheck({ x: snakeHead.x + desiredDirection.x, y: snakeHead.y + desiredDirection.y })) return stuckDirection;
+            const forwards = DIRECTIONS[direction];
+            if (!deathCheck({ x: snakeHead.x + forwards.x, y: snakeHead.y + forwards.y })) return direction;
+            return OPPOSITES[stuckDirection];
+        }
     }
-    if((stuckDirection === 'UP' || stuckDirection === 'DOWN') && direction == 'RIGHT') {
-        if(!deathCheck({ x: snakeHead.x + 10, y: snakeHead.y })) return 'RIGHT';
-        else if(stuckDirection === 'UP' && !deathCheck({ x: snakeHead.x, y: snakeHead.y - 10 })) return 'UP';
-        else if(stuckDirection === 'DOWN' && !deathCheck({ x: snakeHead.x, y: snakeHead.y + 10 })) return 'DOWN';
-    }
-    if((stuckDirection === 'LEFT' || stuckDirection === 'RIGHT') && direction == 'UP') {
-        if(!deathCheck({ x: snakeHead.x, y: snakeHead.y - 10 })) return 'UP';
-        else if(stuckDirection === 'LEFT' && !deathCheck({ x: snakeHead.x - 10, y: snakeHead.y })) return 'LEFT';
-        else if(stuckDirection === 'RIGHT' && !deathCheck({ x: snakeHead.x + 10, y: snakeHead.y })) return 'RIGHT';
-    }
-    if((stuckDirection === 'LEFT' || stuckDirection === 'RIGHT') && direction == 'DOWN') {
-        if(!deathCheck({ x: snakeHead.x, y: snakeHead.y + 10 })) return 'DOWN';
-        else if(stuckDirection === 'LEFT' && !deathCheck({ x: snakeHead.x - 10, y: snakeHead.y })) return 'LEFT';
-        else if(stuckDirection === 'RIGHT' && !deathCheck({ x: snakeHead.x + 10, y: snakeHead.y })) return 'RIGHT';
-    }
-    return false;
 };
 
-function tick (data){
+function moveSnake(data) {
+    console.log('moveSnake', data);
     // Move snakeTiles
-    let tailEnd = snakeTiles[0];
+    const snake = snakeTiles[data.snakeIndex];
+    let tailEnd = snake[0];
     let move = DIRECTIONS[data.direction];
-    for(let i = 0; i < snakeTiles.length; i++) {
+    for(let i = 0; i < snake.length; i++) {
         // Tail
-        if(i < (snakeTiles.length - 1)) {
-            snakeTiles[i] = snakeTiles[i + 1];
+        if(i < (snake.length - 1)) {
+            snake[i] = snake[i + 1];
         }
         // Head
         else {
-            snakeTiles[i] = { x: snakeTiles[i].x + move.x, y: snakeTiles[i].y + move.y };
+            snake[i] = { x: snake[i].x + move.x, y: snake[i].y + move.y };
         }
     }
 
@@ -237,8 +339,11 @@ function tick (data){
     let candyIndex = candyCheck(tailEnd);
     if(candyIndex >= 0) {
         candyTiles.splice(candyIndex, 1);
-        snakeTiles.unshift(tailEnd);
+        snake.unshift(tailEnd);
     }
+}
+
+function tick (data) {
     let before = Date.now();
     let maxSearchLocations = Math.round(data.interval * SEARCH_SPEED);
     let newDirection = searchCandy(data.direction, maxSearchLocations);
@@ -261,13 +366,7 @@ function tick (data){
     // If nothing has been found for too long, add artificial candies to lead snake to other candyTiles
     if(lastCandyFound < Date.now() - 10000) {
         console.log('No candyTiles found for too long, placing artificial candyTiles');
-        // Make this map agnostic, but ignore for now
-        candyTiles.push({ x: 250, y: 300 });
-        candyTiles.push({ x: 550, y: 300 });
-        candyTiles.push({ x: 850, y: 100 });
-        candyTiles.push({ x: 850, y: 500 });
-        candyTiles.push({ x: 1150, y: 300 });
-        candyTiles.push({ x: 1450, y: 300 });
+        placeFakeCandy();
         lastCandyFound = Date.now();
     }
 };
@@ -277,14 +376,15 @@ onmessage = function(message) {
     switch(obj.type) {
         case 'init':
             init(obj.data);
+            console.log(`Webworker AI wim-bot.js ${obj.data.botIndex} ready`);
             break;
-        case 'candyTiles':
+        case 'candy':
             placeCandy(obj.data);
             break;
+        case 'move':
+            moveSnake(obj.data);
         case 'tick':
             tick(obj.data);
             break;
     }
 };
-
-console.log('Webworker AI test-bot.js ready');

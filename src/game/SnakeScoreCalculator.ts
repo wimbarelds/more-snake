@@ -1,8 +1,9 @@
 import { InputHistory } from './SnakePlayer';
-import { Snake, Level, Direction, DIRECTIONS } from './Snake';
+import { SnakeGame, Level, Direction, DIRECTIONS } from './SnakeGame';
 
 export function SnakeScoreCalculator(playId: string, level: Level, inputHistory: InputHistory) {
-    const game = new Snake(playId, level);
+    const game = new SnakeGame(playId, level, 1);
+    const agent = game.snakeAgents[0];
     let tick = 0;
     let gameover = false;
     while(!gameover) {
@@ -11,9 +12,9 @@ export function SnakeScoreCalculator(playId: string, level: Level, inputHistory:
             : (inputHistory.LEFT.indexOf(tick) >= 0) ? 'LEFT'
             : (inputHistory.RIGHT.indexOf(tick) >= 0) ? 'RIGHT' : null;
         
-        if (input) game.setDirection(DIRECTIONS[input]);
-        gameover = !game.tick();
+        if (input) agent.setDirection(DIRECTIONS[input]);
+        gameover = !agent.tick();
         tick++;
     }
-    return game.getScore();
+    return agent.getScore();
 }

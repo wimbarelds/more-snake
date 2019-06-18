@@ -1,24 +1,25 @@
-import { Snake, Pos } from './Snake';
+import { SnakeGame, Pos } from './SnakeGame';
+import { SnakeAgent } from './SnakeAgent';
 
 export const CANVAS_WIDTH = 1280;
 export const CANVAS_HEIGHT = 640;
 
 export interface Theme {
     wallColor: string;
-    snakeColor: string;
+    snakeColor: string[];
     floorColor: string;
     candyColor: string;
 }
 
 export class SnakeRenderer {
-    private game: Snake;
+    private game: SnakeGame;
     private theme: Theme;
     private ctx: CanvasRenderingContext2D;
     private wallCanvas: HTMLCanvasElement;
     private floorCanvas!: HTMLCanvasElement;
     private animationFrame: number = 0;
 
-    constructor(game: Snake, theme: Theme, context: CanvasRenderingContext2D) {
+    constructor(game: SnakeGame, theme: Theme, context: CanvasRenderingContext2D) {
         this.game = game;
         this.theme = theme;
         this.ctx = context;
@@ -45,12 +46,15 @@ export class SnakeRenderer {
         // Draw Candy
         this.drawTilesOnContext(this.game.getCandyTiles(), this.theme.candyColor);
         // Draw Snake
-        this.drawTilesOnContext(this.game.getSnakeTiles(), this.theme.snakeColor);
+        this.game.snakeAgents.forEach((agent: SnakeAgent, agentIndex: number) => {
+            this.drawTilesOnContext(agent.getTiles(), this.theme.snakeColor[agentIndex]);
+        });
         // Draw the next frame when we're ready
         this.animationFrame = requestAnimationFrame(this.draw.bind(this));
     }
 
     public destroy() {
+        this.draw();
         cancelAnimationFrame(this.animationFrame);
     }
 

@@ -71,7 +71,8 @@ export default class GameHighscores extends Vue {
     public scoreSubmitted: boolean = false;
 
     public get playerScore(): number {
-        return this.playerResult ? this.playerResult.score : 0;
+        // Only allow highscore submissions for single player games
+        return (this.playerResult) ? this.playerResult.score : 0;
     }
 
     public get playerHasHighscore(): boolean {
@@ -107,7 +108,7 @@ export default class GameHighscores extends Vue {
             playId: this.playerResult.playId,
             sessionId: this.playerResult.sessionId,
             playerName: this.playerName,
-            score: this.playerResult.score,
+            score: this.playerScore,
             inputHistory: this.playerResult.inputHistory,
         });
         if (!result.data.success) {

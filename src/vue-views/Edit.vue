@@ -9,6 +9,10 @@
                 <button type="button" :class="{active: tool === activeTool }" v-for="tool in tools" :key="tool" @click="activeTool = tool">{{ tool }}</button>
                 <button type="button" @click="resetMap()">Reset Level</button>
             </div>
+            <div class="snake-picker" v-if="activeTool === 'Place Snake'">
+                Snake:
+                <button type="button" v-for="n in 3" :key="n" :disabled="(n - 1) > snakeTiles.length" :class="{active: currSnakeIndex === (n - 1)}" @click="setCurrSnake(n - 1);">{{ n }}</button>
+            </div>
         </div>
         <canvas
             ref="canvas"
@@ -27,6 +31,7 @@ const canvasHeight = 640;
 import { Component, Vue, Watch } from 'vue-property-decorator';
 import Axios from 'axios';
 import { Alert, Confirm } from '@/alerts/alerts';
+import { theme } from './Play.vue';
 
 type Tool = 'Draw Wall' | 'Place Snake' | 'Erase Wall';
 interface Pos {
@@ -34,14 +39,15 @@ interface Pos {
     y: number;
 }
 
-const initialSnakePos = [ { x: 630, y: 320 }, { x: 630, y: 330 } ];
+const initialSnakePos: Pos[] = [ { x: 630, y: 320 }, { x: 630, y: 330 } ];
 
 @Component
 export default class EditView extends Vue {
     public activeTool: Tool = 'Draw Wall';
     public tools: Tool[] = [ 'Draw Wall', 'Place Snake', 'Erase Wall' ];
     public wallTiles: Pos[] = [];
-    public snakeTiles: Pos[] = initialSnakePos;
+    public snakeTiles: Pos[][] = [ initialSnakePos ];
+    public currSnakeIndex: number = 0;
     public levelName: string = '';
     public sessionId: string = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(32);
 
@@ -63,6 +69,10 @@ export default class EditView extends Vue {
         return this.canvas.getContext('2d') as CanvasRenderingContext2D;
     }
 
+    public get numSnakes(): number {
+        return this.snakeTiles.length;
+    }
+
     public mounted(): void {
         // Mouse Up Handler
         this.mouseUpHandler = (e: MouseEvent) => {
@@ -82,8 +92,9 @@ export default class EditView extends Vue {
     public resetMap() {
         this.levelName = '';
         this.activeTool = 'Draw Wall';
-        this.snakeTiles = initialSnakePos;
+        this.snakeTiles = [ initialSnakePos ];
         this.wallTiles = [];
+        this.currSnakeIndex = 0;
         (this.wallCanvas.getContext('2d') as CanvasRenderingContext2D).clearRect(0, 0, canvasWidth, canvasHeight);
     }
 
@@ -108,6 +119,15 @@ export default class EditView extends Vue {
         } else {
             Alert(result.data.message, 'Error saving your level');
         }
+    }
+
+    public setCurrSnake(index: number): void {
+        if (index < 0) return Alert('Jerk') && undefined;
+        if (index >= this.numSnakes) {
+            this.snakeTiles.push(initialSnakePos);
+            this.placeSnake(initialSnakePos[0], index);
+        }
+        this.currSnakeIndex = index;
     }
 
     public mouseMoveHandler(e: MouseEvent) {
@@ -163,7 +183,7 @@ export default class EditView extends Vue {
     private drawWallTile(x: number, y: number) {
         const context = this.wallCanvas.getContext('2d') as CanvasRenderingContext2D;
         context.beginPath();
-        context.fillStyle = '#FFF';
+        context.fillStyle = theme.wallColor;
         context.rect(x, y, 10, 10);
         context.fill();
     }
@@ -174,12 +194,14 @@ export default class EditView extends Vue {
     }
 
     private renderSnake(): void {
-        this.snakeTiles.forEach((pos) => {
-            this.context.beginPath();
-            this.context.fillStyle = '#fd5819';
-            this.context.rect(pos.x, pos.y, 10, 10);
-            this.context.fill();
-        });
+        this.snakeTiles.forEach((snake, snakeIndex) => {
+            snake.forEach((pos) => {
+                this.context.beginPath();
+                this.context.fillStyle = theme.snakeColor[snakeIndex % theme.snakeColor.length];
+                this.context.rect(pos.x, pos.y, 10, 10);
+                this.context.fill();
+            });
+        })
     }
 
     private renderFrame(): void {
@@ -205,16 +227,17 @@ export default class EditView extends Vue {
         if (this.wallTiles.some((tile) => tile.x === pos.x && tile.y === pos.y)) {
             return;
         }
-        if (this.snakeTiles.some((tile) => tile.x === pos.x && tile.y === pos.y)) {
+        if (this.snakeTiles.some((snake) => snake.some((tile) => tile.x === pos.x && tile.y === pos.y))) {
             return;
         }
         this.wallTiles.push(pos);
         this.drawWallTile(pos.x, pos.y);
     }
 
-    private placeSnake(pos: Pos) {
-        this.snakeTiles = [ pos, { x: pos.x, y: pos.y + 10 } ];
-        this.snakeTiles.forEach(this.removeWall.bind(this));
+    private placeSnake(pos: Pos, snakeIndex?: number) {
+        if (typeof snakeIndex === 'undefined') snakeIndex = this.currSnakeIndex;
+        this.snakeTiles[snakeIndex] = [ pos, { x: pos.x, y: pos.y + 10 } ];
+        this.snakeTiles.forEach((snake) => snake.forEach(this.removeWall.bind(this)));
     }
 
     private removeWall(erasePos: Pos) {
@@ -305,6 +328,38 @@ canvas {
         &.active {
             color: var(--color-accent);
         }
+
+        &:disabled {
+            opacity: .5;
+        }
+    }
+}
+
+.snake-picker {
+    position: fixed;
+    top: 50px;
+    right: 10px;
+    border: solid var(--color-primary) 5px;
+    padding: 10px;
+
+    button {
+        border: 0;
+        border-bottom: 0;
+        padding: 0 5px;
+        background-color: transparent;
+        color: var(--color-primary);
+        font-family: 'Arcade Normal';
+        outline: 0;
+        cursor: pointer;
+        line-height: 1;
+
+        &:hover {
+            text-decoration: underline;
+        }
+
+        &.active {
+            color: var(--color-accent);
+        }
     }
 }
 
@@ -334,6 +389,10 @@ canvas {
         input {
             width: calc(100% - 75px);
         }
+    }
+
+    .snake-picker {
+        display: none;
     }
 }
 </style>

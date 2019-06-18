@@ -7,7 +7,7 @@ server.use(express.json());
 
 import { SnakeScoreCalculator } from '../../src/game/SnakeScoreCalculator';
 import { Highscore } from '../../src/game/SnakePlayer';
-import { Pos } from '../../src/game/Snake';
+import { Pos } from '../../src/game/SnakeGame';
 
 
 // all routes
@@ -18,7 +18,7 @@ server.use('/about', express.static(path.join(__dirname, '../../dist')));
 interface GameLevel {
     levelName: string;
     sessionId?: string;
-    snakeTiles: Pos[];
+    snakeTiles: Pos[][];
     wallTiles: Pos[];
 }
 
