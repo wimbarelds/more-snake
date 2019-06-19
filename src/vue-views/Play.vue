@@ -74,6 +74,17 @@ export const theme: Theme = {
   candyColor: '#3F3',
 };
 
+const deepClone = (val: any): any => {
+  if (typeof val !== 'object') return val;
+  if (val instanceof Array) {
+    return val.map((v) => deepClone(v));
+  } else {
+    return Object.keys(val).reduce((obj, attr) => {
+      return Object.assign(obj, { [attr]: deepClone(val[attr]) });
+    }, {} as any);
+  }
+}
+
 type GameState = 'menu' | 'play' | 'replay' | 'highscores' | 'choose-level' | 'load-bot' | 'play-bot';
 @Component({
   components: {
@@ -134,6 +145,12 @@ export default class HomeView extends Vue {
     return this.level.snakeTiles.length;
   }
 
+  public getLevelClone(): Level | null {
+    const level = deepClone(this.level);
+    console.log('levelClone equal', (this.level && level.snakeTiles[0] === this.level.snakeTiles[0]));
+    return level;
+  }
+
   public updateState(newState: GameState): void {
     this.gameState = newState;
     if (newState === 'play') this.play();
@@ -172,7 +189,8 @@ export default class HomeView extends Vue {
   }
 
   public async play() {
-    if (!this.level) {
+    const level = this.getLevelClone();
+    if (!level) {
       Alert(`Can't play when level isn't loaded`);
       return;
     }
@@ -182,7 +200,7 @@ export default class HomeView extends Vue {
 
     // Start a game
     const playId = (await Axios.post(`/get-play-id`, { sessionId: this.sessionId })).data.data;
-    const game = new SnakeGame(playId, this.level, this.numPlayers);
+    const game = new SnakeGame(playId, level, this.numPlayers);
     game.addScoreListener(this.setScore.bind(this));
 
     const canvas = this.$refs.canvas as HTMLCanvasElement;
@@ -198,10 +216,15 @@ export default class HomeView extends Vue {
   }
 
   public async startReplay({ playId, inputHistory }: {playId: string, inputHistory: InputHistory }): Promise<void> {
+    const level = this.getLevelClone();
+    if (!level) {
+      Alert(`Can't play when level isn't loaded`);
+      return;
+    }
+
     this.updateState('replay');
     const canvas = this.$refs.canvas as HTMLCanvasElement;
     const context = canvas.getContext('2d') as CanvasRenderingContext2D;
-    const level = (await Axios.get(`/level/${this.levelName}`)).data.data;
     const game = new SnakeGame(playId, level, 1);
     game.addScoreListener(this.setScore.bind(this));
 
@@ -225,8 +248,9 @@ export default class HomeView extends Vue {
   }
 
   public async playBot(bots: Worker[]): Promise<void> {
-    if (!this.level) {
-      Alert(`Can't activate bot when level isn't loaded`);
+    const level = this.getLevelClone();
+    if (!level) {
+      Alert(`Can't play when level isn't loaded`);
       return;
     }
 
@@ -234,7 +258,6 @@ export default class HomeView extends Vue {
     this.playerResult = null;
     const canvas = this.$refs.canvas as HTMLCanvasElement;
     const context = canvas.getContext('2d') as CanvasRenderingContext2D;
-    const level = (await Axios.get(`/level/${this.levelName}`)).data.data;
     const playId = (await Axios.post(`/get-play-id`, { sessionId: this.sessionId })).data.data;
 
     const game = new SnakeGame(playId, level, bots.length);
